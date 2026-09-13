@@ -11,6 +11,8 @@ interface SearchBarProps {
   hint?: string;
   /** Restrict input to digits (junior unique numbers). */
   numeric?: boolean;
+  /** Transform input text to uppercase */
+  uppercase?: boolean;
   disabled?: boolean;
 }
 
@@ -23,6 +25,7 @@ export default function SearchBar({
   buttonText = 'Search',
   hint,
   numeric = false,
+  uppercase = false,
   disabled = false,
 }: SearchBarProps) {
   const id = useId();
@@ -32,6 +35,16 @@ export default function SearchBar({
     if (!disabled && value.trim()) {
       onSubmit();
     }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = e.target.value;
+    if (numeric) {
+      val = val.replace(/\D/g, '');
+    } else if (uppercase) {
+      val = val.toUpperCase();
+    }
+    onChange(val);
   };
 
   return (
@@ -51,10 +64,10 @@ export default function SearchBar({
             inputMode={numeric ? 'numeric' : undefined}
             autoComplete="off"
             value={value}
-            onChange={(e) => onChange(numeric ? e.target.value.replace(/\D/g, '') : e.target.value)}
+            onChange={handleChange}
             placeholder={placeholder}
             disabled={disabled}
-            className="input py-3.5 pl-12 pr-4 text-base"
+            className={`input py-3.5 pl-12 pr-4 text-base ${uppercase ? 'uppercase' : ''}`}
           />
         </div>
         <button type="submit" disabled={disabled || !value.trim()} className="btn-primary px-6 py-3.5">

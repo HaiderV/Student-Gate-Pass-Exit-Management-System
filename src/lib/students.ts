@@ -5,7 +5,11 @@ import type { DegreeStudent, GatePass, JuniorStudent } from '@/types';
  * Numbers start at 1 and stay sequential — gaps are filled first.
  */
 export function nextAvailableNumber(students: JuniorStudent[]): number {
-  const used = new Set(students.map((s) => s.uniqueNumber));
+  const used = new Set(
+    students
+      .map((s) => s.uniqueNumber ?? s.unique_number)
+      .filter((n): n is number => typeof n === 'number')
+  );
   let next = 1;
   while (used.has(next)) next += 1;
   return next;
@@ -32,11 +36,14 @@ export function findDegreeStudent(
   const q = query.trim().toUpperCase();
   if (!q) return null;
 
-  const fromDirectory = students.find((s) => s.registrationNumber.toUpperCase() === q);
+  const fromDirectory = students.find((s) => {
+    const reg = s.registration_number || s.registrationNumber;
+    return reg && reg.toUpperCase() === q;
+  });
   if (fromDirectory) {
     return {
       name: fromDirectory.name,
-      registrationNumber: fromDirectory.registrationNumber,
+      registrationNumber: fromDirectory.registration_number || fromDirectory.registrationNumber || q,
       course: fromDirectory.course,
       year: fromDirectory.year,
       section: fromDirectory.section,
@@ -80,13 +87,13 @@ export function findJuniorStudent(
   if (!q || !/^\d+$/.test(q)) return null;
   const num = parseInt(q, 10);
 
-  const fromDirectory = students.find((s) => s.uniqueNumber === num);
+  const fromDirectory = students.find((s) => (s.uniqueNumber ?? s.unique_number) === num);
   if (fromDirectory) {
     return {
       id: fromDirectory.id,
       name: fromDirectory.name,
-      uniqueNumber: fromDirectory.uniqueNumber,
-      className: fromDirectory.className,
+      uniqueNumber: fromDirectory.uniqueNumber ?? fromDirectory.unique_number ?? num,
+      className: fromDirectory.class_name || fromDirectory.className || '—',
       section: fromDirectory.section,
     };
   }

@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, LogOut } from 'lucide-react';
+import { CheckCircle2, Clock, ExternalLink, FileText, LogOut } from 'lucide-react';
 import type { GatePass } from '@/types';
 import InfoRow from '@/components/common/InfoRow';
 import StatusBadge from '@/components/common/StatusBadge';
@@ -13,8 +13,8 @@ interface GatePassCardProps {
 export default function GatePassCard({ pass, onMarkExit, className = '' }: GatePassCardProps) {
   const isDegree = pass.studentType === 'degree';
   const contextLine = isDegree
-    ? `${pass.course ?? '—'} · ${pass.year ?? '—'} · Sec ${pass.section}`
-    : `${pass.className ?? '—'} · Section ${pass.section}`;
+    ? `${pass.course ?? '—'} · ${pass.year ?? '—'} · Sec ${pass.section ?? '—'}`
+    : `${pass.className ?? '—'} · Section ${pass.section ?? '—'}`;
   const identifier = isDegree ? (pass.registrationNumber ?? '—') : String(pass.uniqueNumber ?? '—');
 
   return (
@@ -31,25 +31,40 @@ export default function GatePassCard({ pass, onMarkExit, className = '' }: GateP
         <StatusBadge status={pass.status} />
       </div>
 
-      <div className="mb-5 mt-4 grid grid-cols-2 gap-x-4 gap-y-3.5">
+      <div className="mb-4 mt-4 grid grid-cols-2 gap-x-4 gap-y-3.5">
         <InfoRow label="Reason" value={pass.reason} />
         <InfoRow label="Class teacher" value={pass.teacher} />
-        <InfoRow label="Expected exit" value={pass.expectedExit} />
+        <InfoRow label="Created / Exit" value={pass.expectedExit || pass.date} />
         <InfoRow label={isDegree ? 'Course' : 'Class'} value={contextLine} />
       </div>
+
+      {pass.signedLetterUrl && (
+        <div className="mb-4">
+          <a
+            href={pass.signedLetterUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-400 hover:text-sky-300 hover:underline"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span>View Signed Leave Letter</span>
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+      )}
 
       <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/[0.05] pt-3.5">
         <span className="font-mono text-[11px] text-slate-500">{pass.passId}</span>
         {pass.status === 'ACTIVE' && onMarkExit ? (
           <button type="button" className="btn-primary px-3.5 py-2 text-xs" onClick={() => onMarkExit(pass)}>
             <LogOut className="h-3.5 w-3.5" aria-hidden />
-            Mark as Exited
+            Mark Exit
           </button>
         ) : null}
-        {pass.status === 'USED' && (
+        {(pass.status === 'EXITED' || pass.status === 'USED') && (
           <span className="inline-flex items-center gap-1.5 text-xs text-emerald-300/90">
             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
-            Exit recorded{pass.exitTime ? ` at ${pass.exitTime}` : ''}
+            Exited{pass.exitTime ? ` at ${new Date(pass.exitTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
           </span>
         )}
         {pass.status === 'EXPIRED' && (
@@ -58,7 +73,7 @@ export default function GatePassCard({ pass, onMarkExit, className = '' }: GateP
             Pass window elapsed
           </span>
         )}
-        {pass.status === 'CANCELLED' && <span className="text-xs text-slate-500">Cancelled at reception</span>}
+        {pass.status === 'CANCELLED' && <span className="text-xs text-slate-500">Cancelled</span>}
       </div>
     </article>
   );

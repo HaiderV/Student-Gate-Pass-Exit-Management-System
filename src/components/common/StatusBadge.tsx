@@ -2,12 +2,17 @@ import type { ActivityStatus, GatePassStatus } from '@/types';
 
 type BadgeStatus = GatePassStatus | ActivityStatus;
 
-const STYLES: Record<BadgeStatus, { label: string; className: string; dot: string; pulse?: boolean }> = {
+const STYLES: Record<string, { label: string; className: string; dot: string; pulse?: boolean }> = {
   ACTIVE: {
     label: 'Active',
     className: 'border-blue-400/25 bg-blue-500/10 text-blue-300',
     dot: 'bg-blue-400',
     pulse: true,
+  },
+  EXITED: {
+    label: 'Exited',
+    className: 'border-emerald-400/25 bg-emerald-500/10 text-emerald-300',
+    dot: 'bg-emerald-400',
   },
   USED: {
     label: 'Used',
@@ -37,12 +42,12 @@ const STYLES: Record<BadgeStatus, { label: string; className: string; dot: strin
 };
 
 interface StatusBadgeProps {
-  status: BadgeStatus;
+  status: BadgeStatus | string;
   className?: string;
 }
 
 export default function StatusBadge({ status, className = '' }: StatusBadgeProps) {
-  const style = STYLES[status];
+  const style = STYLES[status] || STYLES.ACTIVE;
   return (
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${style.className} ${className}`}

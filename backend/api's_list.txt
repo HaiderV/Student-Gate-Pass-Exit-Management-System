@@ -1,0 +1,79 @@
+Teachers: 
+GET    /api/teachers
+GET    /api/teachers/:id
+POST   /api/teachers
+
+Degree Reception
+POST   /api/degree/gatepasses
+GET    /api/degree/gatepasses/recent
+GET    /api/degree/gatepasses/:id
+
+Degree Security
+GET    /api/degree/gatepasses/search?registration_number=...
+GET    /api/degree/gatepasses/active
+PATCH  /api/degree/gatepasses/:id/exit
+
+Junior Reception
+POST   /api/junior/gatepasses
+GET    /api/junior/gatepasses/recent
+GET    /api/junior/gatepasses/:id
+
+Junior Security
+GET    /api/junior/gatepasses/search?registration_number=...
+GET    /api/junior/gatepasses/active
+GET    /api/junior/students/unique-number/:number
+PATCH  /api/junior/gatepasses/:id/exit
+
+Degree students
+POST   /api/degree/students
+GET    /api/degree/students
+GET    /api/degree/students/:id
+GET    /api/degree/students/search?registration_number=...
+
+Junior students
+POST   /api/junior/students
+GET    /api/junior/students
+GET    /api/junior/students/:id
+GET    /api/junior/students/search?registration_number=...
+
+Junior unique number
+POST   /api/junior/unique-numbers
+GET    /api/junior/unique-numbers
+GET    /api/junior/unique-numbers/:number
+POST /api/junior/unique-numbers/generate
+
+Admin 
+GET /api/admin/dashboard
+
+Calender
+GET /api/admin/calendar?year=2026&month=9
+GET /api/admin/daily/2026-09-12
+
+Historical gatepasses
+GET /api/admin/gatepasses
+
+with filters: 
+?type=degree
+?status=EXITED
+?date=2026-09-12
+?registration_number=D2026012
+
+Student History Degree
+GET /api/admin/degree/students/:id/history
+
+Student History Junior
+GET /api/admin/junior/students/:id/history
+
+Audit APIs
+GET /api/admin/audit-logs
+
+file upload
+signed_letter_url
+
+API flow for creating a gatepass
+POST /api/junior/gatepasses
+
+API flow when security marks exit
+PATCH /api/junior/gatepasses/:id/exit
+
+

@@ -46,7 +46,31 @@
   }
 
   .input {
-    @apply w-full rounded-lg border border-white/10 bg-navy-900/60 px-3.5 py-2.5 text-sm text-white transition placeholder:text-slate-500 focus:border-blue-400/60 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply w-full rounded-lg border border-white/10 bg-navy-900/80 px-3.5 py-2.5 text-sm text-white transition placeholder:text-slate-500 focus:border-blue-400/60 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50;
+    color-scheme: dark;
+  }
+
+  select.input,
+  select {
+    @apply bg-navy-900 text-slate-100 cursor-pointer;
+    color-scheme: dark;
+  }
+
+  select option {
+    background-color: #0b1528 !important;
+    color: #f1f5f9 !important;
+    padding: 8px 12px;
+  }
+
+  select option:hover,
+  select option:focus,
+  select option:checked {
+    background-color: #1e3a8a !important;
+    color: #ffffff !important;
+  }
+
+  input[type="date"] {
+    color-scheme: dark;
   }
 
   .input-error {
@@ -77,3 +101,4 @@
     @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300;
   }
 }
+

@@ -1,203 +1,245 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   BadgeCheck,
   CheckCircle2,
   ClipboardList,
   FileText,
+  Search,
   Upload,
   UserRound,
   X,
 } from 'lucide-react';
-import type { GatePass, JuniorClass, StudentType } from '@/types';
-import { REASON_OPTIONS, SECTION_OPTIONS, YEAR_OPTIONS } from '@/types';
+import type { DegreeStudent, GatePass, JuniorStudent, StudentType, Teacher } from '@/types';
+import { REASON_OPTIONS } from '@/types';
 import Card from '@/components/common/Card';
 import StatusBadge from '@/components/common/StatusBadge';
-import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { timeAfterMinutes, to12Hour } from '@/lib/format';
-import { findDegreeStudent, findJuniorStudent } from '@/lib/students';
-
-interface FormState {
-  registrationNumber: string;
-  uniqueNumber: string;
-  studentName: string;
-  course: string;
-  year: string;
-  className: JuniorClass;
-  section: string;
-  reason: string;
-  expectedExit: string;
-  teacher: string;
-}
-
-const initialForm = (): FormState => ({
-  registrationNumber: '',
-  uniqueNumber: '',
-  studentName: '',
-  course: '',
-  year: '1st Year',
-  className: '11th',
-  section: 'A',
-  reason: 'Medical',
-  expectedExit: timeAfterMinutes(45),
-  teacher: '',
-});
+import {
+  createDegreeGatepass,
+  createJuniorGatepass,
+  getDegreeStudents,
+  getJuniorStudents,
+  getTeachers,
+  searchDegreeStudents,
+  searchJuniorStudents,
+} from '@/lib/api';
 
 interface GatePassFormProps {
   variant: StudentType;
+  onPassCreated?: () => void;
 }
 
-const COPY: Record<StudentType, { title: string; description: string }> = {
-  degree: {
-    title: 'Create Gate Pass',
-    description:
-      "Verify the student's physical permission letter signed by the class teacher, then create the digital gate pass.",
-  },
-  junior: {
-    title: 'Create Gate Pass',
-    description:
-      "Verify the junior student's physical permission, then create the early-exit gate pass for security.",
-  },
-};
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
-/**
- * Reusable gate pass creation form used by both reception portals.
- * The only difference is the student context (degree vs junior).
- */
-export default function GatePassForm({ variant }: GatePassFormProps) {
-  const { state, createGatePass } = useApp();
+export default function GatePassForm({ variant, onPassCreated }: GatePassFormProps) {
   const toast = useToast();
-
-  const [form, setForm] = useState<FormState>(initialForm);
-  const [proofName, setProofName] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
-  const [matched, setMatched] = useState(false);
-  const [createdPass, setCreatedPass] = useState<GatePass | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const copy = COPY[variant];
   const isDegree = variant === 'degree';
 
-  const lookupHint = useMemo(() => {
-    if (isDegree) {
-      const known = form.registrationNumber.trim()
-        ? findDegreeStudent(state.degreeStudents, state.gatePasses, form.registrationNumber)
-        : null;
-      return known
-        ? 'Matched from student records — details filled automatically.'
-        : form.registrationNumber.trim()
-          ? 'Not in records — fill the student details manually.'
-          : 'Enter the registration number to auto-fill student details.';
-    }
-    const known = form.uniqueNumber.trim()
-      ? findJuniorStudent(state.juniorStudents, state.gatePasses, form.uniqueNumber)
-      : null;
-    return known
-      ? 'Matched from junior records — details filled automatically.'
-      : form.uniqueNumber.trim()
-        ? 'Not in records — fill the student details manually.'
-        : 'Enter the unique number to auto-fill student details.';
-  }, [form.registrationNumber, form.uniqueNumber, isDegree, state.degreeStudents, state.gatePasses, state.juniorStudents]);
+  // State
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
 
-  /** Prefill student details when the identifier matches known records. */
-  const handleLookup = () => {
-    if (isDegree) {
-      const found = findDegreeStudent(state.degreeStudents, state.gatePasses, form.registrationNumber);
-      if (found) {
-        setForm((prev) => ({
-          ...prev,
-          studentName: found.name,
-          course: found.course,
-          year: found.year,
-          section: found.section,
-        }));
-        setMatched(true);
-        return;
-      }
-    } else {
-      const found = findJuniorStudent(state.juniorStudents, state.gatePasses, form.uniqueNumber);
-      if (found) {
-        setForm((prev) => ({
-          ...prev,
-          studentName: found.name,
-          className: (found.className === '12th' ? '12th' : '11th') as JuniorClass,
-          section: found.section,
-        }));
-        setMatched(true);
-        return;
+  // Student search / select
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchingStudents, setSearchingStudents] = useState(false);
+  const [studentSearchResults, setStudentSearchResults] = useState<(DegreeStudent | JuniorStudent)[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<DegreeStudent | JuniorStudent | null>(null);
+
+  // Form Fields
+  const [selectedTeacherId, setSelectedTeacherId] = useState('');
+  const [reason, setReason] = useState<string>(REASON_OPTIONS[0]);
+  const [customReason, setCustomReason] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [createdPass, setCreatedPass] = useState<GatePass | null>(null);
+
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Fetch teachers for current variant
+  useEffect(() => {
+    let active = true;
+    async function loadTeachers() {
+      setLoadingTeachers(true);
+      try {
+        const data = await getTeachers(isDegree ? 'DEGREE' : 'JUNIOR');
+        if (active) {
+          setTeachers(data);
+          if (data.length > 0) {
+            setSelectedTeacherId(data[0].id);
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to load teachers:', err);
+      } finally {
+        if (active) setLoadingTeachers(false);
       }
     }
-    setMatched(false);
-  };
+    loadTeachers();
+    return () => {
+      active = false;
+    };
+  }, [isDegree]);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const nextErrors: Partial<Record<keyof FormState, string>> = {};
-
-    if (isDegree) {
-      if (!form.registrationNumber.trim()) nextErrors.registrationNumber = 'Registration number is required';
-      if (!form.studentName.trim()) nextErrors.studentName = 'Student name is required';
-      if (!form.course.trim()) nextErrors.course = 'Course is required';
-    } else {
-      if (!form.uniqueNumber.trim()) nextErrors.uniqueNumber = 'Unique number is required';
-      if (!form.studentName.trim()) nextErrors.studentName = 'Student name is required';
+  // Load initial students preview
+  useEffect(() => {
+    let active = true;
+    async function loadInitialStudents() {
+      try {
+        const data = isDegree ? await getDegreeStudents() : await getJuniorStudents();
+        if (active && data.length > 0 && !selectedStudent) {
+          setStudentSearchResults(data.slice(0, 5));
+        }
+      } catch (err) {
+        // ignore
+      }
     }
-    if (!form.reason) nextErrors.reason = 'Select a reason';
-    if (!form.expectedExit) nextErrors.expectedExit = 'Set the expected exit time';
-    if (!form.teacher.trim()) nextErrors.teacher = "Class teacher's name is required";
+    loadInitialStudents();
+    return () => {
+      active = false;
+    };
+  }, [isDegree]);
 
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
-      toast.error('Missing information', 'Complete the highlighted fields before creating the pass.');
+  // Handle student search
+  const handleStudentSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setStudentSearchResults([]);
       return;
     }
-    setErrors({});
+    setSearchingStudents(true);
+    try {
+      const results = isDegree ? await searchDegreeStudents(q) : await searchJuniorStudents(q);
+      setStudentSearchResults(results);
+      if (results.length === 1) {
+        setSelectedStudent(results[0]);
+      }
+    } catch (err: any) {
+      console.error('Student search error:', err);
+    } finally {
+      setSearchingStudents(false);
+    }
+  };
 
-    const pass = createGatePass({
-      studentType: variant,
-      studentName: form.studentName.trim(),
-      section: form.section,
-      reason: form.reason,
-      teacher: form.teacher.trim(),
-      expectedExit: to12Hour(form.expectedExit),
-      teacherProof: proofName ?? undefined,
-      registrationNumber: isDegree ? form.registrationNumber.trim().toUpperCase() : undefined,
-      course: isDegree ? form.course.trim() : undefined,
-      year: isDegree ? form.year : undefined,
-      uniqueNumber: isDegree ? undefined : Number(form.uniqueNumber),
-      className: isDegree ? undefined : form.className,
-    });
+  // Handle file selection with <= 5MB validation
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    setFileError(null);
 
-    setCreatedPass(pass);
-    setForm(initialForm());
-    setProofName(null);
-    setMatched(false);
-    toast.success('Gate pass created successfully', `${pass.passId} · ${pass.studentName}`);
+    if (!selected) {
+      setFile(null);
+      return;
+    }
+
+    if (selected.size > MAX_FILE_SIZE_BYTES) {
+      const sizeMB = (selected.size / (1024 * 1024)).toFixed(2);
+      setFileError(`File is ${sizeMB}MB. Must be under 5MB.`);
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+      toast.error('File too large', `Selected file exceeds 5MB limit (${sizeMB}MB).`);
+      return;
+    }
+
+    setFile(selected);
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+
+    if (!selectedStudent) {
+      toast.error('Missing Student', 'Please select a student for this gate pass.');
+      return;
+    }
+
+    if (!selectedTeacherId) {
+      toast.error('Missing Teacher', 'Please select a class teacher.');
+      return;
+    }
+
+    const finalReason = reason === 'Other' ? customReason.trim() || 'Other' : reason;
+    if (!finalReason) {
+      toast.error('Missing Reason', 'Please specify a reason for leaving.');
+      return;
+    }
+
+    if (!file) {
+      toast.error('Missing Permission Letter', 'Please upload a signed leave letter (PDF or Image under 5MB).');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('student_id', selectedStudent.id);
+      formData.append('teacher_id', selectedTeacherId);
+      formData.append('reason', finalReason);
+      formData.append('signed_letter', file);
+
+      const res = isDegree ? await createDegreeGatepass(formData) : await createJuniorGatepass(formData);
+
+      const passData = res.gatepass;
+      const teacherObj = teachers.find((t) => t.id === selectedTeacherId);
+
+      const created: GatePass = {
+        id: passData.id,
+        passId: `GP-${passData.id.slice(0, 8).toUpperCase()}`,
+        studentType: variant,
+        studentName: selectedStudent.name,
+        section: selectedStudent.section,
+        reason: finalReason,
+        teacher: teacherObj?.name || 'Class Teacher',
+        expectedExit: '4:00 PM',
+        status: passData.status,
+        date: new Date().toISOString().slice(0, 10),
+        createdAt: passData.created_at || new Date().toISOString(),
+        signedLetterUrl: passData.signed_letter_url,
+        registrationNumber: selectedStudent.registration_number || selectedStudent.registrationNumber,
+        course: (selectedStudent as any).course,
+        className: (selectedStudent as any).class_name || (selectedStudent as any).className,
+      };
+
+      setCreatedPass(created);
+      toast.success(res.message || 'Gate pass created successfully', `${created.passId} · ${created.studentName}`);
+
+      // Reset form fields
+      setSelectedStudent(null);
+      setSearchQuery('');
+      setFile(null);
+      setFileError(null);
+      if (fileRef.current) fileRef.current.value = '';
+      setReason(REASON_OPTIONS[0]);
+      setCustomReason('');
+
+      onPassCreated?.();
+    } catch (err: any) {
+      console.error('Failed to create gatepass:', err);
+      toast.error('Creation Failed', err.message || 'Failed to create gatepass');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <Card title={copy.title} description={copy.description} icon={ClipboardList}>
+    <Card
+      title={`Create ${isDegree ? 'Degree' : 'Junior'} Gate Pass`}
+      description={`Verify the student's physical leave letter, attach the document (under 5MB), and issue the gate pass.`}
+      icon={ClipboardList}
+    >
       <AnimatePresence>
         {createdPass && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            role="status"
             className="mb-6 rounded-xl border border-emerald-400/25 bg-emerald-500/[0.07] p-5"
           >
             <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" aria-hidden />
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
               <div className="min-w-0 flex-1">
                 <p className="font-semibold text-white">Gate Pass Created</p>
-                <p className="mt-0.5 text-xs text-slate-300 sm:text-sm">
-                  The pass is now visible to Security for verification.
+                <p className="mt-0.5 text-xs text-slate-300">
+                  This pass is now active and immediately visible to Security at the gate.
                 </p>
                 <dl className="mt-4 grid gap-2.5 sm:grid-cols-3">
                   <div className="rounded-lg border border-white/[0.08] bg-navy-900/60 px-3.5 py-2.5">
@@ -223,9 +265,9 @@ export default function GatePassForm({ variant }: GatePassFormProps) {
                 type="button"
                 aria-label="Dismiss"
                 onClick={() => setCreatedPass(null)}
-                className="rounded-md p-1 text-slate-500 transition hover:bg-white/5 hover:text-slate-200"
+                className="rounded-md p-1 text-slate-500 hover:text-white"
               >
-                <X className="h-4 w-4" aria-hidden />
+                <X className="h-4 w-4" />
               </button>
             </div>
           </motion.div>
@@ -233,292 +275,214 @@ export default function GatePassForm({ variant }: GatePassFormProps) {
       </AnimatePresence>
 
       <form onSubmit={handleSubmit} noValidate>
-        {/* --- Student information --- */}
-        <section aria-labelledby="student-info-heading">
-          <h3 id="student-info-heading" className="flex items-center gap-2 text-sm font-semibold text-white">
-            <UserRound className="h-4 w-4 text-blue-300" aria-hidden />
-            Student Information
+        {/* --- 1. Student Selection --- */}
+        <section aria-labelledby="student-select-heading">
+          <h3 id="student-select-heading" className="flex items-center gap-2 text-sm font-semibold text-white">
+            <UserRound className="h-4 w-4 text-blue-300" />
+            1. Select Student
           </h3>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {isDegree ? (
-              <div>
-                <label htmlFor="gp-reg" className="label">
-                  Registration number
-                </label>
-                <input
-                  id="gp-reg"
-                  type="text"
-                  autoComplete="off"
-                  value={form.registrationNumber}
-                  onChange={(e) => {
-                    setField('registrationNumber', e.target.value);
-                    setMatched(false);
-                  }}
-                  onBlur={handleLookup}
-                  placeholder="e.g. 23BCA1045"
-                  aria-invalid={Boolean(errors.registrationNumber)}
-                  className={`input font-mono ${errors.registrationNumber ? 'input-error' : ''}`}
-                />
-                {errors.registrationNumber && (
-                  <p className="mt-1.5 text-xs text-rose-400">{errors.registrationNumber}</p>
-                )}
-              </div>
-            ) : (
-              <div>
-                <label htmlFor="gp-uniq" className="label">
-                  Unique number
-                </label>
-                <input
-                  id="gp-uniq"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={form.uniqueNumber}
-                  onChange={(e) => {
-                    setField('uniqueNumber', e.target.value.replace(/\D/g, ''));
-                    setMatched(false);
-                  }}
-                  onBlur={handleLookup}
-                  placeholder="e.g. 23"
-                  aria-invalid={Boolean(errors.uniqueNumber)}
-                  className={`input font-mono ${errors.uniqueNumber ? 'input-error' : ''}`}
-                />
-                {errors.uniqueNumber && <p className="mt-1.5 text-xs text-rose-400">{errors.uniqueNumber}</p>}
-              </div>
-            )}
 
-            <div>
-              <label htmlFor="gp-name" className="label">
-                Student name
-              </label>
-              <input
-                id="gp-name"
-                type="text"
-                autoComplete="off"
-                value={form.studentName}
-                onChange={(e) => setField('studentName', e.target.value)}
-                placeholder="Full name"
-                aria-invalid={Boolean(errors.studentName)}
-                className={`input ${errors.studentName ? 'input-error' : ''}`}
-              />
-              {errors.studentName && <p className="mt-1.5 text-xs text-rose-400">{errors.studentName}</p>}
+          {selectedStudent ? (
+            <div className="mt-3 flex items-center justify-between rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <BadgeCheck className="h-4 w-4 text-sky-400" />
+                  <p className="font-bold text-white">{selectedStudent.name}</p>
+                </div>
+                <p className="mt-1 font-mono text-xs text-slate-300">
+                  Reg No: {selectedStudent.registration_number || selectedStudent.registrationNumber} ·{' '}
+                  {isDegree
+                    ? `${(selectedStudent as DegreeStudent).course} · ${(selectedStudent as DegreeStudent).year} · Sec ${selectedStudent.section}`
+                    : `${(selectedStudent as JuniorStudent).class_name || (selectedStudent as JuniorStudent).className} · Sec ${selectedStudent.section}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudent(null)}
+                className="btn-secondary px-3 py-1.5 text-xs"
+              >
+                Change Student
+              </button>
             </div>
-
-            {isDegree ? (
-              <>
-                <div>
-                  <label htmlFor="gp-course" className="label">
-                    Course
-                  </label>
+          ) : (
+            <div className="mt-3 space-y-3">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
                   <input
-                    id="gp-course"
                     type="text"
-                    autoComplete="off"
-                    value={form.course}
-                    onChange={(e) => setField('course', e.target.value)}
-                    placeholder="e.g. BCA"
-                    aria-invalid={Boolean(errors.course)}
-                    className={`input ${errors.course ? 'input-error' : ''}`}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleStudentSearch())}
+                    placeholder={`Search ${isDegree ? 'degree' : 'junior'} student by name or reg number...`}
+                    className="input pr-10 font-mono uppercase"
                   />
-                  {errors.course && <p className="mt-1.5 text-xs text-rose-400">{errors.course}</p>}
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="gp-year" className="label">
-                      Year
-                    </label>
-                    <select
-                      id="gp-year"
-                      value={form.year}
-                      onChange={(e) => setField('year', e.target.value)}
-                      className="input"
+                <button
+                  type="button"
+                  onClick={handleStudentSearch}
+                  disabled={searchingStudents}
+                  className="btn-secondary shrink-0"
+                >
+                  <Search className="h-4 w-4" />
+                  {searchingStudents ? 'Searching...' : 'Search'}
+                </button>
+              </div>
+
+              {studentSearchResults.length > 0 && (
+                <div className="rounded-xl border border-white/10 bg-navy-900/80 p-2 max-h-48 overflow-y-auto space-y-1">
+                  <p className="px-2 py-1 text-[11px] font-semibold text-slate-400 uppercase">
+                    Select a matching student:
+                  </p>
+                  {studentSearchResults.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setSelectedStudent(s)}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 flex items-center justify-between text-xs transition"
                     >
-                      {YEAR_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="gp-section" className="label">
-                      Section
-                    </label>
-                    <select
-                      id="gp-section"
-                      value={form.section}
-                      onChange={(e) => setField('section', e.target.value)}
-                      className="input"
-                    >
-                      {SECTION_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          Section {option}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <div>
+                        <span className="font-medium text-white">{s.name}</span>
+                        <span className="ml-2 font-mono text-slate-400">({s.registration_number || s.registrationNumber})</span>
+                      </div>
+                      <span className="text-slate-400">
+                        {isDegree
+                          ? `${(s as DegreeStudent).course} · ${(s as DegreeStudent).year}`
+                          : `${(s as JuniorStudent).class_name || (s as JuniorStudent).className} (${s.section})`}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-              </>
-            ) : (
-              <>
-                <div>
-                  <label htmlFor="gp-class" className="label">
-                    Class
-                  </label>
-                  <select
-                    id="gp-class"
-                    value={form.className}
-                    onChange={(e) => setField('className', e.target.value as JuniorClass)}
-                    className="input"
-                  >
-                    <option value="11th">11th</option>
-                    <option value="12th">12th</option>
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="gp-section" className="label">
-                    Section
-                  </label>
-                  <select
-                    id="gp-section"
-                    value={form.section}
-                    onChange={(e) => setField('section', e.target.value)}
-                    className="input"
-                  >
-                    {SECTION_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        Section {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </>
-            )}
-          </div>
-          <p
-            className={`mt-2.5 flex items-center gap-1.5 text-xs ${
-              matched ? 'text-emerald-300/90' : 'text-slate-500'
-            }`}
-          >
-            {matched && <BadgeCheck className="h-3.5 w-3.5" aria-hidden />}
-            {lookupHint}
-          </p>
+              )}
+            </div>
+          )}
         </section>
 
-        {/* --- Gate pass information --- */}
-        <section aria-labelledby="pass-info-heading" className="mt-7 border-t border-white/[0.05] pt-6">
-          <h3 id="pass-info-heading" className="flex items-center gap-2 text-sm font-semibold text-white">
-            <ClipboardList className="h-4 w-4 text-blue-300" aria-hidden />
-            Gate Pass Information
+        {/* --- 2. Teacher Selection --- */}
+        <section aria-labelledby="teacher-select-heading" className="mt-6 border-t border-white/[0.05] pt-5">
+          <h3 id="teacher-select-heading" className="flex items-center gap-2 text-sm font-semibold text-white">
+            <BadgeCheck className="h-4 w-4 text-blue-300" />
+            2. Class Teacher
           </h3>
+          <div className="mt-3">
+            {loadingTeachers ? (
+              <p className="text-xs text-slate-400">Loading {isDegree ? 'Degree' : 'Junior'} teachers...</p>
+            ) : teachers.length === 0 ? (
+              <p className="text-xs text-rose-400">No {isDegree ? 'Degree' : 'Junior'} teachers registered yet in Admin.</p>
+            ) : (
+              <div>
+                <label htmlFor="gp-teacher-select" className="label">
+                  Assigned Teacher (Signed Permission)
+                </label>
+                <select
+                  id="gp-teacher-select"
+                  value={selectedTeacherId}
+                  onChange={(e) => setSelectedTeacherId(e.target.value)}
+                  className="input"
+                >
+                  {teachers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} {t.department ? `(${t.department})` : ''} - {t.teaching_level}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* --- 3. Reason & Upload --- */}
+        <section aria-labelledby="pass-details-heading" className="mt-6 border-t border-white/[0.05] pt-5">
+          <h3 id="pass-details-heading" className="flex items-center gap-2 text-sm font-semibold text-white">
+            <ClipboardList className="h-4 w-4 text-blue-300" />
+            3. Reason & Signed Letter (under 5MB)
+          </h3>
+
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="gp-reason" className="label">
-                Reason for leaving
+              <label htmlFor="gp-reason-select" className="label">
+                Reason for Early Exit
               </label>
               <select
-                id="gp-reason"
-                value={form.reason}
-                onChange={(e) => setField('reason', e.target.value)}
-                aria-invalid={Boolean(errors.reason)}
-                className={`input ${errors.reason ? 'input-error' : ''}`}
+                id="gp-reason-select"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                className="input"
               >
-                {REASON_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
+                {REASON_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
                   </option>
                 ))}
               </select>
-              {errors.reason && <p className="mt-1.5 text-xs text-rose-400">{errors.reason}</p>}
+              {reason === 'Other' && (
+                <input
+                  type="text"
+                  value={customReason}
+                  onChange={(e) => setCustomReason(e.target.value)}
+                  placeholder="Specify custom reason..."
+                  className="input mt-2"
+                />
+              )}
             </div>
-            <div>
-              <label htmlFor="gp-exit" className="label">
-                Expected exit time
-              </label>
-              <input
-                id="gp-exit"
-                type="time"
-                value={form.expectedExit}
-                onChange={(e) => setField('expectedExit', e.target.value)}
-                aria-invalid={Boolean(errors.expectedExit)}
-                className={`input ${errors.expectedExit ? 'input-error' : ''}`}
-              />
-              {errors.expectedExit && <p className="mt-1.5 text-xs text-rose-400">{errors.expectedExit}</p>}
-            </div>
-          </div>
-        </section>
 
-        {/* --- Teacher verification --- */}
-        <section aria-labelledby="teacher-heading" className="mt-7 border-t border-white/[0.05] pt-6">
-          <h3 id="teacher-heading" className="flex items-center gap-2 text-sm font-semibold text-white">
-            <BadgeCheck className="h-4 w-4 text-blue-300" aria-hidden />
-            Teacher Verification
-          </h3>
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-            The college's physical permission process stays the same — verify the signed letter from the class
-            teacher before issuing the pass. No online teacher approval is required.
-          </p>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="gp-teacher" className="label">
-                Class teacher
-              </label>
-              <input
-                id="gp-teacher"
-                type="text"
-                autoComplete="off"
-                value={form.teacher}
-                onChange={(e) => setField('teacher', e.target.value)}
-                placeholder="e.g. Prof. Anil Kumar"
-                aria-invalid={Boolean(errors.teacher)}
-                className={`input ${errors.teacher ? 'input-error' : ''}`}
-              />
-              {errors.teacher && <p className="mt-1.5 text-xs text-rose-400">{errors.teacher}</p>}
-            </div>
-            <div>
-              <span className="label">Teacher proof</span>
+              <label className="label">Signed Letter / Proof (PDF or Image &lt; 5MB)</label>
               <input
                 ref={fileRef}
-                id="gp-proof"
+                id="gp-file-input"
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png"
+                onChange={handleFileChange}
                 className="sr-only"
-                onChange={(e) => setProofName(e.target.files?.[0]?.name ?? null)}
               />
               <div className="flex flex-wrap items-center gap-3">
-                <button type="button" className="btn-secondary" onClick={() => fileRef.current?.click()}>
-                  <Upload className="h-4 w-4" aria-hidden />
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <Upload className="h-4 w-4" />
                   Choose File
                 </button>
-                {proofName ? (
+                {file ? (
                   <span className="chip max-w-full border-emerald-400/25 bg-emerald-500/[0.07] text-emerald-200">
-                    <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    <span className="max-w-[180px] truncate">{proofName}</span>
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                    <span className="max-w-[180px] truncate">{file.name}</span>
+                    <span className="text-[10px] text-slate-400">
+                      ({(file.size / (1024 * 1024)).toFixed(2)} MB)
+                    </span>
                     <button
                       type="button"
-                      aria-label="Remove selected file"
-                      className="rounded p-0.5 transition hover:text-white"
+                      aria-label="Remove file"
+                      className="rounded p-0.5 hover:text-white"
                       onClick={() => {
-                        setProofName(null);
+                        setFile(null);
                         if (fileRef.current) fileRef.current.value = '';
                       }}
                     >
-                      <X className="h-3 w-3" aria-hidden />
+                      <X className="h-3 w-3" />
                     </button>
                   </span>
                 ) : (
-                  <span className="text-xs text-slate-500">Signed permission letter (PDF or image)</span>
+                  <span className="text-xs text-slate-400">PDF, JPG, PNG under 5MB</span>
                 )}
               </div>
+              {fileError && <p className="mt-1.5 text-xs text-rose-400">{fileError}</p>}
             </div>
           </div>
         </section>
 
         <div className="mt-7 flex flex-col gap-3 border-t border-white/[0.05] pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-slate-500">The pass becomes visible to Security immediately.</p>
-          <button type="submit" className="btn-primary w-full sm:w-auto">
-            <ClipboardList className="h-4 w-4" aria-hidden />
-            Create Gate Pass
+          <p className="text-xs text-slate-500">
+            Pass is created with ACTIVE status and becomes available at Security immediately.
+          </p>
+          <button
+            type="submit"
+            disabled={submitting || !selectedStudent || !file}
+            className="btn-primary w-full sm:w-auto"
+          >
+            <ClipboardList className="h-4 w-4" />
+            {submitting ? 'Creating Gate Pass...' : 'Create Gate Pass'}
           </button>
         </div>
       </form>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { History } from 'lucide-react';
+import { ExternalLink, FileText, History, RefreshCw } from 'lucide-react';
 import type { GatePass, GatePassStatus } from '@/types';
 import Card from '@/components/common/Card';
 import EmptyState from '@/components/common/EmptyState';
@@ -11,8 +11,7 @@ type StatusFilter = 'ALL' | GatePassStatus;
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'ALL', label: 'All' },
   { value: 'ACTIVE', label: 'Active' },
-  { value: 'USED', label: 'Used' },
-  { value: 'EXPIRED', label: 'Expired' },
+  { value: 'EXITED', label: 'Exited' },
   { value: 'CANCELLED', label: 'Cancelled' },
 ];
 
@@ -20,10 +19,18 @@ interface GatePassListProps {
   passes: GatePass[];
   emptyTitle: string;
   emptyDescription: string;
+  loading?: boolean;
+  onRefresh?: () => void;
 }
 
 /** Reception history of created gate passes with status filter. */
-export default function GatePassList({ passes, emptyTitle, emptyDescription }: GatePassListProps) {
+export default function GatePassList({
+  passes,
+  emptyTitle,
+  emptyDescription,
+  loading = false,
+  onRefresh,
+}: GatePassListProps) {
   const [filter, setFilter] = useState<StatusFilter>('ALL');
 
   const sorted = useMemo(() => sortPassesNewestFirst(passes), [passes]);
@@ -41,9 +48,21 @@ export default function GatePassList({ passes, emptyTitle, emptyDescription }: G
       description="Recently created passes for this portal, newest first."
       icon={History}
       action={
-        <span className="chip">
-          {sorted.length} {sorted.length === 1 ? 'pass' : 'passes'}
-        </span>
+        <div className="flex items-center gap-2">
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-300 hover:bg-white/10 hover:text-white"
+              title="Refresh passes"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+          <span className="chip">
+            {sorted.length} {sorted.length === 1 ? 'pass' : 'passes'}
+          </span>
+        </div>
       }
     >
       <div role="group" aria-label="Filter by status" className="flex flex-wrap gap-2">
@@ -70,7 +89,9 @@ export default function GatePassList({ passes, emptyTitle, emptyDescription }: G
       </div>
 
       <div className="mt-5">
-        {visible.length === 0 ? (
+        {loading && sorted.length === 0 ? (
+          <div className="py-8 text-center text-sm text-slate-400">Loading passes from database...</div>
+        ) : visible.length === 0 ? (
           <EmptyState
             compact
             icon={History}
@@ -88,7 +109,7 @@ export default function GatePassList({ passes, emptyTitle, emptyDescription }: G
                     <th scope="col" className="th">Student</th>
                     <th scope="col" className="th">Course / Class</th>
                     <th scope="col" className="th">Reason</th>
-                    <th scope="col" className="th">Expected Exit</th>
+                    <th scope="col" className="th">Leave Letter</th>
                     <th scope="col" className="th">Teacher</th>
                     <th scope="col" className="th">Status</th>
                   </tr>
@@ -102,7 +123,7 @@ export default function GatePassList({ passes, emptyTitle, emptyDescription }: G
                         <span className="mt-0.5 block font-mono text-xs text-slate-400">
                           {pass.studentType === 'degree'
                             ? pass.registrationNumber ?? '—'
-                            : `Unique No: ${pass.uniqueNumber ?? '—'}`}
+                            : (pass.uniqueNumber ? `Unique #${pass.uniqueNumber}` : pass.registrationNumber ?? '—')}
                         </span>
                       </td>
                       <td className="td text-slate-300">
@@ -111,7 +132,22 @@ export default function GatePassList({ passes, emptyTitle, emptyDescription }: G
                           : `${pass.className ?? '—'} · ${pass.section}`}
                       </td>
                       <td className="td text-slate-300">{pass.reason}</td>
-                      <td className="td text-slate-300">{pass.expectedExit}</td>
+                      <td className="td">
+                        {pass.signedLetterUrl ? (
+                          <a
+                            href={pass.signedLetterUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300 hover:underline"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            <span>PDF</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span className="text-xs text-slate-500">—</span>
+                        )}
+                      </td>
                       <td className="td text-slate-300">{pass.teacher}</td>
                       <td className="td">
                         <StatusBadge status={pass.status} />
@@ -134,16 +170,12 @@ export default function GatePassList({ passes, emptyTitle, emptyDescription }: G
                   <p className="mt-0.5 font-mono text-xs text-slate-400">
                     {pass.studentType === 'degree'
                       ? pass.registrationNumber ?? '—'
-                      : `Unique No: ${pass.uniqueNumber ?? '—'}`}
+                      : (pass.uniqueNumber ? `Unique #${pass.uniqueNumber}` : pass.registrationNumber ?? '—')}
                   </p>
                   <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs">
                     <div>
                       <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Reason</dt>
                       <dd className="mt-0.5 font-medium text-slate-200">{pass.reason}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Expected</dt>
-                      <dd className="mt-0.5 font-medium text-slate-200">{pass.expectedExit}</dd>
                     </div>
                     <div>
                       <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Teacher</dt>
@@ -157,6 +189,22 @@ export default function GatePassList({ passes, emptyTitle, emptyDescription }: G
                           : `${pass.className ?? '—'} · ${pass.section}`}
                       </dd>
                     </div>
+                    {pass.signedLetterUrl && (
+                      <div>
+                        <dt className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Leave Letter</dt>
+                        <dd className="mt-0.5">
+                          <a
+                            href={pass.signedLetterUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-medium text-sky-400 hover:underline"
+                          >
+                            <FileText className="h-3 w-3" />
+                            View Letter
+                          </a>
+                        </dd>
+                      </div>
+                    )}
                   </dl>
                 </article>
               ))}

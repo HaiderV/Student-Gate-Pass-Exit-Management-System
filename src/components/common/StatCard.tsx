@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 
-type StatTone = 'blue' | 'sky' | 'emerald' | 'amber' | 'slate';
+type StatTone = 'blue' | 'sky' | 'emerald' | 'amber' | 'slate' | 'rose';
 
 const TONES: Record<StatTone, string> = {
   blue: 'bg-blue-500/10 text-blue-300 ring-blue-400/20',
@@ -8,6 +8,7 @@ const TONES: Record<StatTone, string> = {
   emerald: 'bg-emerald-500/10 text-emerald-300 ring-emerald-400/20',
   amber: 'bg-amber-500/10 text-amber-300 ring-amber-400/20',
   slate: 'bg-slate-500/10 text-slate-300 ring-slate-400/20',
+  rose: 'bg-rose-500/10 text-rose-300 ring-rose-400/20',
 };
 
 interface StatCardProps {

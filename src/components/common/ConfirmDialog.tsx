@@ -50,7 +50,7 @@ export default function ConfirmDialog({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-950/70 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-navy-950/85 p-4 backdrop-blur-md"
           onClick={onCancel}
         >
           <motion.div
@@ -61,7 +61,7 @@ export default function ConfirmDialog({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-navy-800 p-6 shadow-pop"
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-navy-900 p-6 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
